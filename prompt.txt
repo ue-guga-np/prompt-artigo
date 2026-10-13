@@ -1,0 +1,368 @@
+<role>
+Você é um Engenheiro de Software Sênior e um especialista em Godot Engine 4.3 (GDScript). Sua especialidade é realizar manutenção preventiva e refatoração de código em jogos educacionais, garantindo escalabilidade, código limpo e transição segura de arquiteturas de dados.
+</role>
+
+<context>
+Estou refatorando um jogo educacional de alfabetização (focado em sílabas). Anteriormente, os arquivos de mídia (áudios e imagens) ficavam dentro do projeto Godot (res://) e os dados eram lidos de um arquivo words.json interno com estrutura plana.
+Agora estou migrando para uma estrutura de diretório EXTERNO ao projeto, localizado em Documentos/NinoEdu/data/, com a seguinte organização:
+- Documentos/NinoEdu/data/audio/    → arquivos .ogg
+- Documentos/NinoEdu/data/images/   → arquivos .png
+- Documentos/NinoEdu/data/data.json → banco de dados principal
+O data.json possui estrutura hierárquica (categoria → nível → itens):
+{
+  "silabas": {
+    "a": [
+      {
+        "txt": "BA",
+        "palavra": "BANANA",
+        "som": "ba.ogg",
+        "imgs": ["Ba_Banana_Foto_1.png", "Ba_Banana_Imagem_1.png"],
+        "complemento": "_ _NANA"
+      }
+    ]
+  },
+  "palavras": {"a": []},
+  "textos": {"a": []}
+}
+O words.json antigo tinha estrutura plana com 18 itens. Cada rodada do jogo sorteava 3 itens para os slots de resposta (botao_silaba) e usava os 6 primeiros itens embaralhados como opções arrastáveis (botao_arrastavel) — sendo 3 corretos e 3 distratores (itens dos índices 3, 4 e 5 do array embaralhado, cujas sílabas não correspondem a nenhum slot de resposta).
+IMPORTANTE — dois scripts auxiliares que precisam de ajustes pontuais: botao_arrastavel.gd: - A propriedade caminho_som recebe o caminho do áudio e é usada em: - _on_timer_timeout() → ALTERAR: substituir Audios.tocar_audio(caminho_som, self) por Audios.audio_botao(caminho_som). Motivo: tocar_audio() possui um guard if not $audio.playing que descarta silenciosamente o som da sílaba quando o áudio de fundo (audio_jogo.ogg) está tocando. O som de hover deve tocar imediatamente via audio_botao(), que interrompe qualquer instrução e toca na hora, sem passar pela fila. - desabilitar_botao() → chama Audios.audio_botao(caminho_som) — manter. - tocar_audio() → chama Audios.audio_botao(caminho_som) — manter. Audios.gd:
+- tocar_instrucao(caminho) → usa load(caminho) — mantém res:// pois esses áudios são internos ao projeto.
+- tocar_audio(caminho, requester) → usa load(caminho) — PRECISA ser corrigido para aceitar caminhos externos.
+- audio_botao(caminho) → usa load(caminho) — PRECISA ser corrigido para aceitar caminhos externos.
+- _on_instrucao_finished() → usa load(caminho) — PRECISA ser corrigido para aceitar caminhos externos.
+</context>
+
+<instructions>
+Refatore os scripts abaixo seguindo estes passos:
+1. **Global.gd**
+   - Carregue o data.json externo usando FileAccess e JSON do Godot 4.3.
+   - Monte o caminho base via OS.get_system_dir(OS.SYSTEM_DIR_DOCUMENTS).path_join("NinoEdu").path_join("data").
+   - Exponha audio_path e images_path como variáveis centralizadas.
+   - Crie get_audio_path(nome) e get_image_path(nome) para construir caminhos absolutos.
+   - Crie load_image(nome) que carrega uma imagem externa e retorna ImageTexture, com tratamento de erro.
+   - array_of_words deve apontar para data["silabas"]["a"] (padrão), com suporte a trocar categoria/nível via _set_nivel(categoria, nivel).
+   - embaralhar() deve embaralhar array_of_words e preparar array_of_imagens do item 0.
+   - Trate todos os erros possíveis: arquivo não encontrado, falha de parse, tipo errado na raiz.
+2. **Audios.gd**
+   - Altere APENAS as funções que usam load(caminho) para áudios externos: tocar_audio(), audio_botao() e _on_instrucao_finished().
+   - Substitua load(caminho) por AudioStreamOggVorbis.load_from_file(caminho) nessas funções.
+   - tocar_instrucao() usa load() com caminhos res:// internos — NÃO altere essa função.
+   - Não altere nenhuma outra lógica de controle de fila, prioridade ou sobreposição de áudios.
+3. **como_jogar.gd**
+   - Substitua .silaba → ["txt"], .complemento_silaba → ["complemento"], .som → ["som"].
+   - Substitua load(imagem_path) por Global.load_image(Global.array_of_imagens[0]).
+   - Chame Global._atualizar_imagens(i) antes de ler Global.array_of_imagens para cada item.
+   - O caminho_som dos botões deve usar Global.get_audio_path(item["som"]).
+   - O áudio audio_jogo.ogg também está na pasta externa — use Global.get_audio_path("audio_jogo.ogg").
+4. **main.gd**
+   - Corrija o loop de botao_silaba: iterar array_posicao_botao_silaba.size() vezes (3 slots de resposta), acessando Global.array_of_words[i] para os dados de cada slot.
+   - Corrija o loop de botao_arrastavel: iterar array_posicao_botao_arrastavel.size() vezes (6 botões arrastáveis). Os índices 0–2 são as sílabas corretas (correspondem aos 3 slots); os índices 3–5 são distratores (itens extras do array embaralhado, sem slot correspondente — só têm sílaba e som, sem imagem/complemento).
+   - Substitua as chaves antigas pelas novas em todos os acessos ao dicionário.
+   - Use Global._atualizar_imagens(i) + Global.load_image() no lugar de load() direto.
+   - Use Global.get_audio_path() para todos os caminhos de áudio externo.
+</instructions>
+
+<constraints>
+- Utilize ESTRITAMENTE a sintaxe e boas práticas do Godot 4.3.
+- Não altere lógica visual, mecânicas de jogo, animações ou posicionamento de nós.
+- Altere APENAS a camada de acesso a dados e carregamento de arquivos externos.
+- Forneça o código COMPLETO de cada script, sem omitir partes com comentários do tipo "# resto do código aqui".
+- Trate erros de carregamento no Global.gd.
+- Não remova nem reescreva funções que não precisam mudar.
+</constraints>
+
+<code>
+Global.gd:
+'
+extends Node
+var words: Dictionary
+var array_of_words: Array
+var array_of_imagens: Array
+# Dados para plataforma
+var Score : int = 0
+var erros : int = 0
+var TempoDeJogo_Min : int = 0
+var TempoDeJogo_Sec : int = 0
+var JogoConcluido : bool = false
+#Permite que a intro toque só uma vez
+var Intro_tocar : bool = true
+#
+var arrastando = false
+func _ready() -> void:
+    # Carregar o JSON e passar para a variável
+    words = load_json()
+    array_of_words = words.words
+    embaralhar()
+func embaralhar():
+    array_of_words.shuffle()
+    array_of_imagens = array_of_words[0].imagens
+    array_of_imagens.shuffle()
+func load_json():
+    var file = "res://files/words.json"
+    var json_as_text = FileAccess.get_file_as_string(file)
+    var json_as_dict = JSON.parse_string(json_as_text)
+    return json_as_dict
+'
+como_jogar.gd:
+'
+extends Node2D
+var mouse_dentro = false
+signal ir_para_main
+func _ready() -> void:
+    Global.embaralhar()
+    Audios.tocar_instrucao("res://assets/Audios/audio_jogo.ogg")
+    Menu.telaInicial = false
+    #define textos primeira silaba
+    $Botao_arrastavel2.text = Global.array_of_words[0].silaba
+    $botao_silaba1.get_node("silaba").text = Global.array_of_words[0].complemento_silaba
+    #carrega imagem
+    var textura = load(Global.array_of_imagens[0].imagem)
+    $botao_silaba1.get_node("imagem").texture = textura
+    #som
+    $Botao_arrastavel2.caminho_som = Global.array_of_words[0].som
+    #define textos segunda silaba
+    $Botao_arrastavel1.text = Global.array_of_words[1].silaba
+    $botao_silaba2.get_node("silaba").text = Global.array_of_words[1].complemento_silaba
+    #carrega imagem
+    Global.array_of_imagens = Global.array_of_words[1].imagens
+    textura = load(Global.array_of_imagens[0].imagem)
+    $botao_silaba2.get_node("imagem").texture = textura
+    #som
+    $Botao_arrastavel1.caminho_som = Global.array_of_words[1].som
+    #desabilitando botoes
+    $Botao_arrastavel1.disabled = true
+    $Botao_arrastavel2.disabled = true
+    $botao_silaba1.desabilitar()
+    $botao_silaba2.desabilitar()
+    como_jogar()
+func como_jogar():
+    Audios.tocar_instrucao("res://assets/Audios/como_jogar/vamos_aprender_a_jogar.ogg")
+    await get_tree().create_timer(2.5).timeout
+    Audios.tocar_instrucao("res://assets/Audios/como_jogar/arraste_a_silaba.ogg")
+    await get_tree().create_timer(3.0).timeout
+    #errado
+    $AnimationPlayer.play("arraste_errado")
+    await get_tree().create_timer(2.2).timeout
+    $botao_silaba2._errou()
+    await get_tree().create_timer(1.5).timeout
+    Audios.tocar_instrucao("res://assets/Audios/como_jogar/tente_outra_vez.ogg")
+    await get_tree().create_timer(5.0).timeout
+    #retire a silaba errada
+    Audios.tocar_instrucao("res://assets/Audios/como_jogar/retire_a_silaba.ogg")
+    await get_tree().create_timer(1.0).timeout
+    $AnimationPlayer.play("retira_errado")
+    await get_tree().create_timer(1.3).timeout
+    $botao_silaba2.volta_textura_normal()
+    await get_tree().create_timer(2.0).timeout
+    #certo
+    Audios.tocar_instrucao("res://assets/Audios/como_jogar/arraste_a_silaba.ogg")
+    await get_tree().create_timer(3.0).timeout
+    $AnimationPlayer.play("acerta1")
+    await get_tree().create_timer(2.4).timeout
+    $botao_silaba1._acertou()
+    await get_tree().create_timer(1.3).timeout
+    Audios.tocar_instrucao("res://assets/Audios/como_jogar/muito_bem.ogg")
+    await get_tree().create_timer(3.0).timeout
+    Audios.tocar_acertou()
+    await get_tree().create_timer(4.0).timeout
+    #certo de novo
+    Audios.tocar_instrucao("res://assets/Audios/como_jogar/arraste_a_silaba.ogg")
+    await get_tree().create_timer(3.0).timeout
+    $AnimationPlayer.play("acerta2")
+    await get_tree().create_timer(2.6).timeout
+    $botao_silaba2._acertou()
+    await get_tree().create_timer(1.5).timeout
+    Audios.tocar_acertou()
+    await get_tree().create_timer(4.0).timeout
+    ir_para_main.emit()
+func _on_pular_tutorial_pressed() -> void:
+    ir_para_main.emit()
+func _on_pular_tutorial_mouse_entered() -> void:
+    mouse_dentro = true
+    $Timer_botao.start()
+func _on_pular_tutorial_mouse_exited() -> void:
+    mouse_dentro = false
+    $Timer_botao.stop()
+func _on_timer_botao_timeout() -> void:
+    Audios.tocar_audio("res://assets/Audios/como_jogar/pular_tutorial.ogg", self)
+    $Timer_botao.stop()
+func is_mouse_inside() -> bool:
+    return mouse_dentro
+'
+main.gd:
+'
+extends Node2D
+#array posicoes
+var array_posicao_botao_arrastavel = [Vector2(195,450), Vector2(310,450),
+Vector2(425,450), Vector2(540,450), Vector2(655,450), Vector2(770,450)]
+var array_posicao_botao_silaba = [Vector2(270,240), Vector2(560,240),
+Vector2(850,240)]
+#array com nos
+var array_botoes_arrastaveis:Array
+var array_botoes_silabas:Array
+#cenas
+var botao_arrastavel_scene = preload("res://scenes/botao_arrastavel.tscn")
+var botao_silaba_scene = preload("res://scenes/botao_silaba.tscn")
+#quantidade de botoes certos
+var botoes_certos = 0
+#salva id do botao arrastavel
+var id_botao_arrastavel: int
+var mouse_dentro = false
+signal _instancia_como_jogar
+func _ready() -> void:
+    Audios.tocar_instrucao("res://assets/Audios/audio_jogo.ogg")
+    Menu.telaInicial = false
+    #embaralha array
+    array_posicao_botao_arrastavel.shuffle()
+    array_posicao_botao_silaba.shuffle()
+    #instanciar botao_silaba
+    for i in array_posicao_botao_silaba.size():
+        var botao_silaba = botao_silaba_scene.instantiate()
+        #posicao
+        botao_silaba.position = array_posicao_botao_silaba[i]
+        #define id
+        botao_silaba.id = i
+        #define textos
+        botao_silaba.get_node("silaba").text = Global.array_of_words[i].complemento_silaba
+        #carrega imagem
+        Global.array_of_imagens = Global.array_of_words[i].imagens
+        Global.array_of_imagens.shuffle()
+        var textura = load(Global.array_of_imagens[0].imagem)
+        botao_silaba.get_node("imagem").texture = textura
+        #conexao
+        botao_silaba.connect("soltou_area", Callable(self, "_on_botao_silaba_soltou_area"))
+        array_botoes_silabas.append(botao_silaba)
+        $botoes.add_child(botao_silaba)
+    #instanciar botao_arrastavel
+    for i in array_posicao_botao_silaba.size():
+        var botao_silaba = botao_silaba_scene.instantiate()
+        #posicao
+        botao_silaba.position = array_posicao_botao_silaba[i]
+        #define id
+        botao_silaba.id = i
+        #define textos
+        botao_silaba.get_node("silaba").text = Global.array_of_words[i].complemento_silaba
+        #carrega imagem
+        Global.array_of_imagens = Global.array_of_words[i].imagens
+        Global.array_of_imagens.shuffle()
+        var textura = load(Global.array_of_imagens[0].imagem)
+        botao_silaba.get_node("imagem").texture = textura
+        #conexao
+        botao_silaba.connect("soltou_area", Callable(self, "_on_botao_silaba_soltou_area"))
+        array_botoes_silabas.append(botao_silaba)
+        $botoes.add_child(botao_silaba)
+    #instanciar botao_arrastavel
+    for i in array_posicao_botao_arrastavel.size():
+        var botao_arrastavel = botao_arrastavel_scene.instantiate()
+        #posicao
+        botao_arrastavel.position = array_posicao_botao_arrastavel[i]
+        #id
+        botao_arrastavel.id = i
+        #texto
+        botao_arrastavel.text = Global.array_of_words[i].silaba
+        #som
+        botao_arrastavel.caminho_som = Global.array_of_words[i].som
+        #conexao
+        botao_arrastavel.connect("enviar_id", Callable(self, "_on_botao_arrastavel_enviar_id"))
+        array_botoes_arrastaveis.append(botao_arrastavel)
+        $botoes.add_child(botao_arrastavel)
+func _on_botao_arrastavel_enviar_id(id) -> void:
+    id_botao_arrastavel = id
+func _on_botao_silaba_soltou_area(id) -> void:
+    if id == id_botao_arrastavel:
+        acertou(id)
+    else:
+        errou(id)
+func acertou(id):
+    $TimerInstrucao.start()
+    Global.Score += 34
+    botoes_certos += 1
+    var definir_pos = array_botoes_silabas[id].get_node("Marker").global_position
+    array_botoes_arrastaveis[id_botao_arrastavel].position = definir_pos - array_botoes_arrastaveis[id_botao_arrastavel].size/2
+    array_botoes_arrastaveis[id_botao_arrastavel].desabilitar_botao()
+    array_botoes_silabas[id]._acertou()
+    await get_tree().create_timer(1.2).timeout
+    Audios.tocar_acertou()
+    if botoes_certos == 3:
+        await get_tree().create_timer(5.0).timeout
+        get_tree().change_scene_to_file("res://scenes/fim.tscn")
+func errou(id):
+    array_botoes_arrastaveis[id_botao_arrastavel].tocar_audio()
+    Global.Score -= 2
+    Global.erros += 1
+    var definir_pos = array_botoes_silabas[id].get_node("Marker").global_position
+    array_botoes_arrastaveis[id_botao_arrastavel].position = definir_pos - array_botoes_arrastaveis[id_botao_arrastavel].size/2
+    array_botoes_silabas[id]._errou()
+func contando_tempo() -> void:
+    Global.TempoDeJogo_Sec += 1 
+    if Global.TempoDeJogo_Sec > 59:
+        Global.TempoDeJogo_Min += 1
+        Global.TempoDeJogo_Sec = 0
+func _on_timer_instrucao_timeout() -> void:
+    Audios.tocar_instrucao("res://assets/Audios/audio_jogo.ogg")
+func _on_como_jogar_pressed() -> void:
+    $Timer.stop()
+    $TimerInstrucao.stop()
+    _instancia_como_jogar.emit()
+func _on_como_jogar_mouse_entered() -> void:
+    mouse_dentro = true
+    $TimerBotao.start()
+func _on_como_jogar_mouse_exited() -> void:
+    mouse_dentro = false
+    $TimerBotao.stop()
+func _on_timer_botao_timeout() -> void:
+    Audios.tocar_audio("res://assets/Audios/como_jogar.ogg", self)
+    $TimerBotao.stop()
+func is_mouse_inside() -> bool:
+    return mouse_dentro
+func voltando_a_main() -> void:
+    $Timer.start()
+    $TimerInstrucao.start()
+'
+Audios.gd:
+'
+extends Node
+var pedido_pendente: Dictionary = {}
+func tocar_instrucao(caminho_instrucao: String) -> void:
+    $audio.stop()
+    $acertou.stop()
+    $instrucao.stream = load(caminho_instrucao)
+    $instrucao.play()
+func tocar_audio(caminho_audio: String, requester: Node) -> void:
+    if $instrucao.playing or $audio_botao.playing or $acertou.playing:
+        pedido_pendente = { "caminho": caminho_audio, "requester": requester }
+        return
+    # toca só se nada estiver tocando
+    if not $audio.playing:
+        $audio.stream = load(caminho_audio)
+        $audio.play()
+func tocar_acertou():
+    $acertou.play()
+    await get_tree().create_timer(4.0).timeout
+    $acertou.stop()
+func audio_botao(caminho_audio: String):
+    $instrucao.stop()
+    $audio_botao.stream = load(caminho_audio)
+    $audio_botao.play()
+func _on_instrucao_finished() -> void:
+    if pedido_pendente.is_empty():
+        return
+    var caminho = pedido_pendente.get("caminho")
+    var requester = pedido_pendente.get("requester")
+    pedido_pendente.clear()
+    # garante que o botão ainda existe e o mouse ainda está nele
+    if is_instance_valid(requester) and requester.is_mouse_inside():
+        $audio.stream = load(caminho)
+        $audio.play()
+'
+</code>
+
+<request>
+Com base no novo data.json e nas instruções acima, reescreva os quatro scripts para que funcionem corretamente com a nova estrutura de dados dinâmica e com arquivos externos.
+</request>
+
+<format>
+Para cada arquivo modificado, retorne:
+1. Uma breve explicação do que foi alterado e por quê.
+2. O bloco de código GDScript completo refatorado.
+</format>
